@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: cb-cluster-ui
+  namespace: couchbase
+  labels:
+    app: couchbase
+spec:
+  type: NodePort
+  ports:
+  - name: ui
+    port: 8091
+    targetPort: 8091
+    nodePort: 30091
+  - name: capi
+    port: 8092
+    targetPort: 8092
+    nodePort: 30092
+  selector:
+    couchbase_cluster: cb-cluster
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cb-cluster
+  namespace: couchbase
+  annotations:
+    ad.datadoghq.com/service.check_names: '["couchbase"]'
+    ad.datadoghq.com/service.init_configs: '[{}]'
+    ad.datadoghq.com/service.instances: |
+      [
+        {
+          "server": "http://%%host%%:8091",
+          "username": "Administrator",
+          "password": "Password123!"
+        }
+      ]
+  labels:
+    app: couchbase
+spec:
+  type: ClusterIP
+  ports:
+  - name: couchbase
+    port: 8091
+    targetPort: 8091
+  - name: couchbase-data
+    port: 11210
+    targetPort: 11210
+  selector:
+    couchbase_cluster: cb-cluster
+

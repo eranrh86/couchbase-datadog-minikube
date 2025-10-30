@@ -1,0 +1,238 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: couchbase-traffic-generator
+  namespace: couchbase
+spec:
+  restartPolicy: Never
+  containers:
+  - name: traffic-generator
+    image: python:3.9-slim
+    command: ["/bin/bash"]
+    args:
+      - -c
+      - |
+        pip install couchbase requests --quiet
+        
+        cat > /tmp/traffic_generator.py << 'PYEOF'
+        import time
+        import random
+        import json
+        from datetime import datetime, timedelta
+        from couchbase.cluster import Cluster
+        from couchbase.auth import PasswordAuthenticator
+        from couchbase.options import ClusterOptions, UpsertOptions, GetOptions
+        from couchbase.durability import ServerDurability, Durability
+        
+        # Connect to Couchbase
+        auth = PasswordAuthenticator('Administrator', 'Password123!')
+        cluster = Cluster('couchbase://cb-cluster.couchbase.svc.cluster.local', ClusterOptions(auth))
+        cluster.wait_until_ready(timedelta(seconds=30))
+        
+        # Get bucket
+        bucket = cluster.bucket('test-bucket')
+        collection = bucket.default_collection()
+        
+        print("=" * 60)
+        print("Couchbase Traffic Generator - Comprehensive Operations")
+        print("=" * 60)
+        print()
+        
+        operation_count = 0
+        start_time = time.time()
+        
+        def print_stats():
+            elapsed = time.time() - start_time
+            ops_per_sec = operation_count / elapsed if elapsed > 0 else 0
+            print(f"\r[Stats] Operations: {operation_count} | Rate: {ops_per_sec:.2f} ops/sec | Time: {int(elapsed)}s", end='', flush=True)
+        
+        # Phase 1: Initial data load (writes)
+        print("Phase 1: Loading initial data (triggering bytes_written)...")
+        for i in range(200):
+            doc_id = f"user:{i}"
+            doc = {
+                "type": "user",
+                "id": i,
+                "name": f"User {i}",
+                "email": f"user{i}@example.com",
+                "age": random.randint(18, 80),
+                "balance": random.randint(100, 100000),
+                "preferences": {
+                    "theme": random.choice(["light", "dark"]),
+                    "notifications": random.choice([True, False]),
+                    "language": random.choice(["en", "es", "fr", "de"])
+                },
+                "metadata": {
+                    "created": datetime.now().isoformat(),
+                    "last_login": datetime.now().isoformat(),
+                    "login_count": random.randint(1, 1000)
+                },
+                "tags": [f"tag{j}" for j in range(random.randint(1, 5))],
+                "description": "A" * random.randint(100, 500)  # Variable size documents
+            }
+            collection.upsert(doc_id, doc)
+            operation_count += 1
+            if i % 50 == 0:
+                print_stats()
+        
+        print()
+        print("✓ Loaded 200 user documents")
+        print()
+        
+        # Phase 2: Read operations (cmd_get, bytes_read)
+        print("Phase 2: Performing read operations (triggering cmd_get, bytes_read)...")
+        for i in range(500):
+            doc_id = f"user:{random.randint(0, 199)}"
+            try:
+                result = collection.get(doc_id)
+                operation_count += 1
+            except:
+                pass
+            if i % 100 == 0:
+                print_stats()
+        
+        print()
+        print("✓ Performed 500 read operations")
+        print()
+        
+        # Phase 3: Update operations (disk commits, disk updates)
+        print("Phase 3: Performing updates (triggering disk_commit_time, disk_update_time)...")
+        for i in range(300):
+            doc_id = f"user:{random.randint(0, 199)}"
+            try:
+                result = collection.get(doc_id)
+                doc = result.content_as[dict]
+                doc['balance'] = random.randint(100, 100000)
+                doc['metadata']['last_update'] = datetime.now().isoformat()
+                doc['metadata']['login_count'] = doc['metadata'].get('login_count', 0) + 1
+                collection.upsert(doc_id, doc)
+                operation_count += 1
+            except:
+                pass
+            if i % 100 == 0:
+                print_stats()
+        
+        print()
+        print("✓ Performed 300 update operations")
+        print()
+        
+        # Phase 4: CAS operations (cas_hits, cas_misses, cas_badval)
+        print("Phase 4: Performing CAS operations (triggering cas_hits, cas_misses, cas_badval)...")
+        cas_hits = 0
+        cas_misses = 0
+        cas_badval = 0
+        
+        for i in range(200):
+            doc_id = f"user:{random.randint(0, 199)}"
+            try:
+                # Get with CAS
+                result = collection.get(doc_id)
+                cas = result.cas
+                doc = result.content_as[dict]
+                
+                # Update
+                doc['balance'] = random.randint(100, 100000)
+                
+                # Randomly cause CAS conflicts
+                if random.random() < 0.3:  # 30% chance of CAS conflict
+                    # Modify with wrong CAS
+                    try:
+                        collection.replace(doc_id, doc, cas=cas + 1)
+                        cas_badval += 1
+                    except:
+                        cas_badval += 1
+                else:
+                    # Correct CAS
+                    try:
+                        collection.replace(doc_id, doc, cas=cas)
+                        cas_hits += 1
+                    except:
+                        cas_misses += 1
+                
+                operation_count += 1
+            except:
+                cas_misses += 1
+            
+            if i % 50 == 0:
+                print_stats()
+        
+        print()
+        print(f"✓ CAS Operations: {cas_hits} hits, {cas_misses} misses, {cas_badval} badval")
+        print()
+        
+        # Phase 5: Mixed workload (realistic traffic)
+        print("Phase 5: Running mixed workload (all operations)...")
+        for i in range(1000):
+            operation = random.choice(['read', 'write', 'update', 'cas'])
+            doc_id = f"user:{random.randint(0, 199)}"
+            
+            try:
+                if operation == 'read':
+                    # GET operation
+                    collection.get(doc_id)
+                    operation_count += 1
+                    
+                elif operation == 'write':
+                    # UPSERT operation
+                    doc = {
+                        "type": "transaction",
+                        "id": random.randint(1000, 9999),
+                        "amount": random.randint(1, 10000),
+                        "timestamp": datetime.now().isoformat(),
+                        "data": "X" * random.randint(50, 200)
+                    }
+                    collection.upsert(f"txn:{i}", doc)
+                    operation_count += 1
+                    
+                elif operation == 'update':
+                    # UPDATE operation
+                    result = collection.get(doc_id)
+                    doc = result.content_as[dict]
+                    doc['balance'] = doc.get('balance', 0) + random.randint(-100, 100)
+                    doc['metadata']['last_update'] = datetime.now().isoformat()
+                    collection.upsert(doc_id, doc)
+                    operation_count += 1
+                    
+                elif operation == 'cas':
+                    # CAS operation
+                    result = collection.get(doc_id)
+                    cas = result.cas
+                    doc = result.content_as[dict]
+                    doc['balance'] = random.randint(100, 100000)
+                    collection.replace(doc_id, doc, cas=cas)
+                    operation_count += 1
+            except:
+                pass
+            
+            if i % 200 == 0:
+                print_stats()
+            
+            # Small delay to simulate realistic traffic
+            time.sleep(0.01)
+        
+        print()
+        print()
+        print("=" * 60)
+        print("Traffic Generation Complete!")
+        print("=" * 60)
+        elapsed = time.time() - start_time
+        print(f"Total Operations: {operation_count}")
+        print(f"Duration: {int(elapsed)} seconds")
+        print(f"Average Rate: {operation_count/elapsed:.2f} ops/sec")
+        print()
+        print("Expected Metrics in Datadog:")
+        print("  ✓ couchbase.by_bucket.cmd_get - Read operations")
+        print("  ✓ couchbase.by_bucket.bytes_read - Data read from disk")
+        print("  ✓ couchbase.by_bucket.bytes_written - Data written to disk")
+        print("  ✓ couchbase.by_bucket.cas_hits - Successful CAS operations")
+        print("  ✓ couchbase.by_bucket.cas_misses - Failed CAS operations")
+        print("  ✓ couchbase.by_bucket.cas_badval - CAS with wrong value")
+        print("  ✓ couchbase.by_bucket.avg_disk_commit_time - Disk commit latency")
+        print("  ✓ couchbase.by_bucket.avg_disk_update_time - Disk update latency")
+        print("  ✓ couchbase.by_bucket.avg_bg_wait_time - Background wait time")
+        print("  ✓ couchbase.by_bucket.bg_wait_total - Total background wait")
+        print()
+        PYEOF
+        
+        python /tmp/traffic_generator.py
+

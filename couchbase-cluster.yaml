@@ -1,0 +1,38 @@
+apiVersion: couchbase.com/v2
+kind: CouchbaseCluster
+metadata:
+  name: cb-cluster
+  namespace: couchbase
+spec:
+  image: couchbase/server:7.2.0
+  security:
+    adminSecret: cb-admin-auth
+  networking:
+    exposeAdminConsole: true
+    adminConsoleServices:
+      - data
+    exposedFeatureServiceType: NodePort
+    exposedFeatures:
+      - client
+      - xdcr
+  servers:
+    - name: data
+      size: 2
+      services:
+        - data
+        - index
+        - query
+      serverGroups: []
+      volumeMounts:
+        default: couchbase
+        data: couchbase
+        index: couchbase
+  volumeClaimTemplates:
+    - metadata:
+        name: couchbase
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 5Gi

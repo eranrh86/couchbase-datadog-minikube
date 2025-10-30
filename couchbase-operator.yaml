@@ -1,0 +1,130 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: couchbase-operator
+  namespace: couchbase
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: couchbase-operator
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  - services
+  - endpoints
+  - persistentvolumeclaims
+  - events
+  - configmaps
+  - secrets
+  - serviceaccounts
+  verbs:
+  - '*'
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  - daemonsets
+  - replicasets
+  - statefulsets
+  verbs:
+  - '*'
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+- apiGroups:
+  - policy
+  resources:
+  - poddisruptionbudgets
+  verbs:
+  - '*'
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - '*'
+- apiGroups:
+  - couchbase.com
+  resources:
+  - couchbaseclusters
+  - couchbaseclusters/status
+  - couchbaseclusters/finalizers
+  - couchbasebuckets
+  - couchbasebuckets/status
+  - couchbasebuckets/finalizers
+  - couchbasebackups
+  - couchbasebackuprestores
+  - couchbasememcachedbuckets
+  - couchbaseephemeralbuckets
+  - couchbasereplications
+  - couchbaseusers
+  - couchbasegroups
+  - couchbaserolebindings
+  - couchbaseautoscalers
+  - couchbaseautoscalers/status
+  verbs:
+  - '*'
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: couchbase-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: couchbase-operator
+subjects:
+- kind: ServiceAccount
+  name: couchbase-operator
+  namespace: couchbase
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: couchbase-operator
+  namespace: couchbase
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: couchbase-operator
+  template:
+    metadata:
+      labels:
+        app: couchbase-operator
+    spec:
+      serviceAccountName: couchbase-operator
+      containers:
+      - name: couchbase-operator
+        image: couchbase/operator:2.5.1
+        command:
+        - couchbase-operator
+        env:
+        - name: WATCH_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: OPERATOR_NAME
+          value: "couchbase-operator"
+        ports:
+        - name: metrics
+          containerPort: 8383
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+

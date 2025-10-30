@@ -1,0 +1,112 @@
+#!/bin/bash
+
+# Complete Datadog Agent Deployment with Couchbase Integration
+# TEMPLATE FILE - Copy to deploy-datadog-complete.sh and add your API key
+set -e
+
+echo "=================================================="
+echo "Datadog Agent + Couchbase Integration Deployment"
+echo "=================================================="
+echo ""
+
+# Check for API key
+if [ -z "$1" ]; then
+    echo "❌ ERROR: Datadog API key required!"
+    echo ""
+    echo "Usage: ./deploy-datadog-complete.sh YOUR_DATADOG_API_KEY"
+    echo ""
+    echo "Get your API key from: https://app.datadoghq.com/organization-settings/api-keys"
+    echo ""
+    exit 1
+fi
+
+DD_API_KEY=$1
+
+echo "Step 1: Installing Datadog Agent via Helm..."
+echo "-----------------------------------------------"
+
+# Add Datadog helm repo if not exists
+helm repo add datadog https://helm.datadoghq.com 2>/dev/null || true
+helm repo update
+
+# Install Datadog with Couchbase integration
+helm install datadog datadog/datadog \
+  --namespace couchbase \
+  --set datadog.apiKey="$DD_API_KEY" \
+  --set datadog.site=datadoghq.com \
+  --set datadog.logs.enabled=true \
+  --set datadog.logs.containerCollectAll=true \
+  --set datadog.apm.portEnabled=true \
+  --set datadog.processAgent.enabled=true \
+  --set datadog.kubeStateMetricsCore.enabled=true \
+  --set datadog.clusterName=minikube-couchbase \
+  --set agents.image.tag=latest \
+  --set clusterAgent.enabled=true \
+  --set datadog.kubelet.tlsVerify=false \
+  --set 'datadog.confd.couchbase\.yaml=ad_identifiers:
+  - couchbase-server
+  - couchbase
+init_config:
+instances:
+  - server: http://cb-cluster.couchbase.svc.cluster.local:8091
+    username: Administrator
+    password: Password123!
+    timeout: 10
+    collect_cluster_metrics: true
+    collect_bucket_metrics: true
+    query_monitoring_url: http://cb-cluster.couchbase.svc.cluster.local:8093/_p/query/stats
+    tags:
+      - env:minikube
+      - service:couchbase
+      - cluster:cb-cluster' \
+  --wait --timeout=5m
+
+echo ""
+echo "Step 2: Annotating Couchbase pods for Autodiscovery..."
+echo "-------------------------------------------------------"
+
+# Add autodiscovery annotations to Couchbase service
+kubectl annotate service cb-cluster -n couchbase \
+  ad.datadoghq.com/service.check_names='["couchbase"]' \
+  ad.datadoghq.com/service.init_configs='[{}]' \
+  ad.datadoghq.com/service.instances='[{"server":"http://%%host%%:8091","username":"Administrator","password":"Password123!","collect_cluster_metrics":true,"collect_bucket_metrics":true,"query_monitoring_url":"http://%%host%%:8093/_p/query/stats","tags":["env:minikube","service:couchbase"]}]' \
+  --overwrite || echo "  (Annotations may already exist)"
+
+echo ""
+echo "Step 3: Verifying Datadog Agent deployment..."
+echo "-----------------------------------------------"
+
+# Wait for pods
+kubectl wait --for=condition=ready pod -l app=datadog -n couchbase --timeout=180s
+
+echo ""
+echo "Step 4: Checking Datadog Agent status..."
+echo "-----------------------------------------------"
+
+DD_POD=$(kubectl get pods -n couchbase -l app=datadog -o jsonpath='{.items[0].metadata.name}')
+
+if [ -z "$DD_POD" ]; then
+    echo "⚠️  Datadog pods not found yet. Run this command to check manually:"
+    echo "  kubectl get pods -n couchbase -l app=datadog"
+else
+    echo "Datadog Agent Pod: $DD_POD"
+    echo ""
+    echo "Waiting 30 seconds for agent to start collecting metrics..."
+    sleep 30
+    
+    echo ""
+    echo "Checking Couchbase integration status:"
+    kubectl exec -n couchbase $DD_POD -- agent status 2>/dev/null | grep -A 30 "couchbase" || echo "  Agent starting up... Check again in 1 minute"
+fi
+
+echo ""
+echo "=================================================="
+echo "✅ Datadog Agent Deployment Complete!"
+echo "=================================================="
+echo ""
+echo "📊 Metrics should appear in Datadog within 1-2 minutes"
+echo ""
+echo "🔍 Verify in Datadog:"
+echo "  https://app.datadoghq.com/metric/explorer?search=couchbase"
+echo ""
+

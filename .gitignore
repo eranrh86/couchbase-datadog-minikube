@@ -1,0 +1,33 @@
+# Datadog Secrets - DO NOT COMMIT
+datadog-secret.yaml
+*api-key*
+*API_KEY*
+*api_key*
+
+# Kubernetes Secrets
+*-secret.yaml
+couchbase-secret.yaml
+
+# Sensitive scripts with API keys
+deploy-datadog-complete.sh
+
+# OS Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp

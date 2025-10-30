@@ -1,0 +1,164 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: couchbase-data-generator
+  namespace: couchbase
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: data-generator
+        image: curlimages/curl:latest
+        command: ["/bin/sh"]
+        args:
+          - -c
+          - |
+            CB_USER="Administrator"
+            CB_PASS="Password123!"
+            CB_HOST="cb-cluster.couchbase.svc.cluster.local"
+            CB_URL="http://$CB_HOST:8091"
+            
+            echo "======================================"
+            echo "Couchbase Data Generator Job"
+            echo "======================================"
+            echo ""
+            echo "Connecting to: $CB_URL"
+            echo ""
+            
+            # Wait for Couchbase to be ready
+            echo "Waiting for Couchbase to be ready..."
+            for i in {1..30}; do
+              if curl -s -u $CB_USER:$CB_PASS "$CB_URL/pools" > /dev/null 2>&1; then
+                echo "✓ Couchbase is ready!"
+                break
+              fi
+              echo "  Waiting... ($i/30)"
+              sleep 2
+            done
+            
+            echo ""
+            echo "Step 1: Creating test bucket 'test-bucket'..."
+            curl -s -u $CB_USER:$CB_PASS -X POST $CB_URL/pools/default/buckets \
+              -d name=test-bucket \
+              -d bucketType=couchbase \
+              -d ramQuota=256 \
+              -d durabilityMinLevel=none \
+              -d flushEnabled=1 \
+              -d replicaNumber=1 || echo "  (Bucket may already exist)"
+            
+            sleep 5
+            
+            echo ""
+            echo "Step 2: Creating 'metrics-bucket'..."
+            curl -s -u $CB_USER:$CB_PASS -X POST $CB_URL/pools/default/buckets \
+              -d name=metrics-bucket \
+              -d bucketType=couchbase \
+              -d ramQuota=256 \
+              -d durabilityMinLevel=none \
+              -d flushEnabled=1 \
+              -d replicaNumber=1 || echo "  (Bucket may already exist)"
+            
+            sleep 5
+            
+            echo ""
+            echo "Step 3: Inserting sample documents..."
+            echo ""
+            
+            # Insert user documents
+            echo "Inserting 50 user documents..."
+            for i in $(seq 1 50); do
+              DOC_ID="user-$i"
+              RANDOM_AGE=$((20 + $i % 50))
+              DOC_DATA="{\"type\":\"user\",\"id\":$i,\"name\":\"User $i\",\"email\":\"user$i@example.com\",\"age\":$RANDOM_AGE,\"created\":\"2025-10-29T20:00:00Z\",\"active\":true}"
+              
+              curl -s -u $CB_USER:$CB_PASS -X POST "$CB_URL/query/service" \
+                -d "statement=UPSERT INTO \`test-bucket\` (KEY, VALUE) VALUES ('$DOC_ID', $DOC_DATA)" > /dev/null 2>&1 || \
+              curl -s -u $CB_USER:$CB_PASS -X PUT "$CB_URL/pools/default/buckets/test-bucket/docs/$DOC_ID" \
+                -H "Content-Type: application/json" \
+                -d "$DOC_DATA" > /dev/null 2>&1
+              
+              if [ $((i % 10)) -eq 0 ]; then
+                echo "  ✓ Inserted $i users"
+              fi
+            done
+            
+            echo ""
+            echo "Inserting 30 product documents..."
+            for i in $(seq 1 30); do
+              DOC_ID="product-$i"
+              PRICE=$((10 + $i * 33))
+              STOCK=$((i * 10))
+              CAT=$((i % 5 + 1))
+              DOC_DATA="{\"type\":\"product\",\"id\":$i,\"name\":\"Product $i\",\"price\":$PRICE,\"category\":\"Category $CAT\",\"stock\":$STOCK,\"created\":\"2025-10-29T20:00:00Z\"}"
+              
+              curl -s -u $CB_USER:$CB_PASS -X POST "$CB_URL/query/service" \
+                -d "statement=UPSERT INTO \`test-bucket\` (KEY, VALUE) VALUES ('$DOC_ID', $DOC_DATA)" > /dev/null 2>&1 || \
+              curl -s -u $CB_USER:$CB_PASS -X PUT "$CB_URL/pools/default/buckets/test-bucket/docs/$DOC_ID" \
+                -H "Content-Type: application/json" \
+                -d "$DOC_DATA" > /dev/null 2>&1
+              
+              if [ $((i % 10)) -eq 0 ]; then
+                echo "  ✓ Inserted $i products"
+              fi
+            done
+            
+            echo ""
+            echo "Inserting 40 order documents..."
+            for i in $(seq 1 40); do
+              DOC_ID="order-$i"
+              USER_ID=$((i % 50 + 1))
+              PRODUCT_ID=$((i % 30 + 1))
+              QTY=$((i % 10 + 1))
+              TOTAL=$((100 + i * 50))
+              DOC_DATA="{\"type\":\"order\",\"id\":$i,\"user_id\":$USER_ID,\"product_id\":$PRODUCT_ID,\"quantity\":$QTY,\"total\":$TOTAL,\"status\":\"completed\",\"created\":\"2025-10-29T20:00:00Z\"}"
+              
+              curl -s -u $CB_USER:$CB_PASS -X POST "$CB_URL/query/service" \
+                -d "statement=UPSERT INTO \`test-bucket\` (KEY, VALUE) VALUES ('$DOC_ID', $DOC_DATA)" > /dev/null 2>&1 || \
+              curl -s -u $CB_USER:$CB_PASS -X PUT "$CB_URL/pools/default/buckets/test-bucket/docs/$DOC_ID" \
+                -H "Content-Type: application/json" \
+                -d "$DOC_DATA" > /dev/null 2>&1
+              
+              if [ $((i % 10)) -eq 0 ]; then
+                echo "  ✓ Inserted $i orders"
+              fi
+            done
+            
+            echo ""
+            echo "Inserting 20 metric documents..."
+            for i in $(seq 1 20); do
+              DOC_ID="metric-$i"
+              VALUE=$((i * 100))
+              DOC_DATA="{\"type\":\"metric\",\"id\":$i,\"name\":\"metric_$i\",\"value\":$VALUE,\"timestamp\":\"2025-10-29T20:00:00Z\",\"tags\":[\"env:prod\",\"service:api\"]}"
+              
+              curl -s -u $CB_USER:$CB_PASS -X POST "$CB_URL/query/service" \
+                -d "statement=UPSERT INTO \`metrics-bucket\` (KEY, VALUE) VALUES ('$DOC_ID', $DOC_DATA)" > /dev/null 2>&1 || \
+              curl -s -u $CB_USER:$CB_PASS -X PUT "$CB_URL/pools/default/buckets/metrics-bucket/docs/$DOC_ID" \
+                -H "Content-Type: application/json" \
+                -d "$DOC_DATA" > /dev/null 2>&1
+              
+              if [ $((i % 10)) -eq 0 ]; then
+                echo "  ✓ Inserted $i metrics"
+              fi
+            done
+            
+            echo ""
+            echo "======================================"
+            echo "✅ Data Generation Complete!"
+            echo "======================================"
+            echo ""
+            echo "Summary:"
+            echo "  - Created 2 buckets"
+            echo "  - Inserted 50 user documents"
+            echo "  - Inserted 30 product documents"
+            echo "  - Inserted 40 order documents"
+            echo "  - Inserted 20 metric documents"
+            echo ""
+            echo "Total: 140 documents"
+            echo ""
+            
+            # Get bucket stats
+            echo "Bucket Statistics:"
+            curl -s -u $CB_USER:$CB_PASS "$CB_URL/pools/default/buckets" | grep -o '"name":"[^"]*"' || echo "Check Web UI"
+            echo ""
+

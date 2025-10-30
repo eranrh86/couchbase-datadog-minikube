@@ -1,0 +1,74 @@
+# Datadog Agent Helm Values with Couchbase Integration
+datadog:
+  apiKey: "DATADOG_API_KEY_PLACEHOLDER"
+  site: datadoghq.com
+  
+  # Enable logs, APM, and metrics
+  logs:
+    enabled: true
+    containerCollectAll: true
+  
+  apm:
+    portEnabled: true
+  
+  processAgent:
+    enabled: true
+  
+  # Kubernetes state metrics
+  kubeStateMetricsEnabled: true
+  kubeStateMetricsCore:
+    enabled: true
+  
+  # Cluster name
+  clusterName: minikube-couchbase
+  
+  # Container runtime
+  criSocketPath: /var/run/dockershim.sock
+  
+  # Autodiscovery for Couchbase
+  confd:
+    couchbase.yaml: |-
+      ad_identifiers:
+        - couchbase-server
+        - couchbase
+      init_config:
+      instances:
+        - server: http://%%host%%:8091
+          username: Administrator
+          password: Password123!
+          timeout: 10
+          # Collect cluster-level metrics
+          collect_cluster_metrics: true
+          # Collect per-bucket metrics
+          collect_bucket_metrics: true
+          # Query monitoring endpoint
+          query_monitoring_url: http://%%host%%:8093/_p/query/stats
+          # Tags
+          tags:
+            - env:minikube
+            - service:couchbase
+            - cluster:cb-cluster
+
+agents:
+  # Use latest image
+  image:
+    tag: latest
+  
+  # Tolerations for minikube
+  tolerations:
+    - operator: Exists
+  
+  # Custom volumes for docker socket
+  volumes:
+    - name: dockersocket
+      hostPath:
+        path: /var/run/docker.sock
+  volumeMounts:
+    - name: dockersocket
+      mountPath: /var/run/docker.sock
+
+# Cluster Agent (optional but recommended)
+clusterAgent:
+  enabled: true
+  replicas: 1
+

@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: couchbase-datadog-config
+  namespace: couchbase
+  labels:
+    app: couchbase
+data:
+  couchbase.yaml: |
+    init_config:
+    instances:
+      - server: http://cb-cluster.couchbase.svc.cluster.local:8091
+        username: Administrator
+        password: Password123!
+        timeout: 10
+        collect_cluster_metrics: true
+        collect_bucket_metrics: true
+        tags:
+          - env:minikube
+          - service:couchbase
+
